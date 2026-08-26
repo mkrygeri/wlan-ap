@@ -125,6 +125,75 @@ function get_bridge_pvid(ifname) {
 	return null;
 }
 
+/*
+ * Resolve the one port strict forwarding lets traffic through from.
+ *
+ * The schema defines strict forwarding as isolating the BSS from every other
+ * member of its bridge apart from the first wired port. bridger takes a single
+ * target port and it has to sit in the BSS's own bridge: the policy is derived
+ * from the target's VLAN output and the bridge MAC, and bridger_output() only
+ * passes frames whose ingress port is that target or which the AP itself
+ * sourced. Naming a port in a different bridge therefore drops everything the
+ * clients send instead of isolating them, which is what an SSID on a
+ * downstream interface used to get, since the WAN is not a member of the
+ * downstream bridge.
+ *
+ * Returns null while the BSS is not bridged yet. The redirect is re-asserted on
+ * client association, so that case resolves itself and is not worth reporting.
+ */
+function strict_fwd_redirect_port(ifname) {
+	let master = fs.readlink(`/sys/class/net/${ifname}/master`);
+	if (!master)
+		return null;
+
+	let bridge = fs.basename(master);
+	let members = fs.lsdir(`/sys/class/net/${bridge}/brif`);
+	if (!members)
+		return null;
+
+	/* keep using the uplink whenever it shares the BSS's bridge */
+	for (let wan in wan_ports)
+		if (index(members, wan) >= 0)
+			return wan;
+
+	/* otherwise the first wired member, lsdir() sorts so this is stable */
+	for (let member in members)
+		if (!fs.access(`/sys/class/net/${member}/phy80211`))
+			return member;
+
+	warn(`ucentral-event: no wired port in ${bridge}, cannot enable strict forwarding on ${ifname}\n`);
+
+	return null;
+}
+
+/*
+ * Push the strict forwarding redirect for a BSS into bridger.
+ *
+ * This has to be re-asserted rather than set once: bridger drops
+ * dev->redirect_dev whenever the netdev detaches from the bridge
+ * (device_set_attached() -> device_set_redirect(dev, 0)), and it rejects
+ * set_device_config for a netdev it has not learned via netlink yet. Both
+ * cases are silent, so a single call at BSS start can be lost with no way
+ * to notice. device_set_redirect() is a no-op when the value is unchanged,
+ * so repeating the call is cheap.
+ */
+function strict_fwd_set_redirect(hapd) {
+	if (!+hapd?.config?.strict_forwarding)
+		return;
+
+	let port = strict_fwd_redirect_port(hapd.ifname);
+	if (!port)
+		return;
+
+	let ret = ubus.call('bridger', 'set_device_config', {
+		name: hapd.ifname,
+		redirect: port
+	});
+
+	if (ret == null)
+		warn(`ucentral-event: failed to enable strict forwarding on ${hapd.ifname} via ${port}: ${ubus.error()}\n`);
+}
+
 function strict_fwd_update_fdb(hapd, address) {
 	if (!+hapd?.config?.strict_forwarding)
 		return;
@@ -256,6 +325,7 @@ handlers = {
 			ubus.call('ratelimit', 'client_set', msg);
 		}
 
+		strict_fwd_set_redirect(hapd);
 		strict_fwd_update_fdb(hapd, notify.data.address);
 	},
 
@@ -420,11 +490,7 @@ function hostapd_add(path, obj) {
 
 	printf('%.J\n', hostapd[ifname]);
 
-	if (+hostapd[ifname].config?.strict_forwarding)
-		ubus.call('bridger', 'set_device_config', {
-			name: ifname,
-			redirect: wan_ports[0]
-		});
+	strict_fwd_set_redirect(hostapd[ifname]);
 
 	if (hostapd[ifname].op_class >= 81 &&
 	    hostapd[ifname].op_class <= 84)
