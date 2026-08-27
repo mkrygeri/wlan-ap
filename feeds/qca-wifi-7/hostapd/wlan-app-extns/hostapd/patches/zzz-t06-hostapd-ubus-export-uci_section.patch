@@ -1,0 +1,23 @@
+#
+# Export the uci_section BSS config parameter added by
+# zzz-901-cfg-section.patch in the hostapd.<bss> get_status ubus reply.
+#
+# ucentral-event and rrmd use it to locate the UCI section a BSS was
+# generated from (uci.get_all('wireless', <uci_section>)). Without it
+# hapd.config stays undefined, which silently disables strict forwarding,
+# the strict forwarding static FDB updates, the DHCP relay option-82
+# ssid/vlan-id formats and per-BSS RRM configuration.
+#
+diff --git a/src/ap/ubus.c b/src/ap/ubus.c
+--- a/src/ap/ubus.c
++++ b/src/ap/ubus.c
+@@ -416,6 +416,9 @@
+ 			hapd->iface->cac_started ? hapd->iface->dfs_cac_ms / 1000 - now.sec : 0);
+ 	blobmsg_close_table(&b, dfs_table);
+ 
++	if (hapd->conf->uci_section)
++		blobmsg_add_string(&b, "uci_section", hapd->conf->uci_section);
++
+ 	ubus_send_reply(ctx, req, b.head);
+ 
+ 	return 0;

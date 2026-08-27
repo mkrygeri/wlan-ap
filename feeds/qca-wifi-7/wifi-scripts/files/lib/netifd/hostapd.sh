@@ -435,6 +435,8 @@ hostapd_common_add_bss_config() {
 	config_add_string rsn_override_key_mgmt_2 rsn_override_pairwise_2
 
 	config_add_int wps_cred_add_sae
+
+	config_add_string uci_section
 }
 
 hostapd_set_vlan_file() {
@@ -696,7 +698,8 @@ hostapd_set_bss_options() {
 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
 		vendor_elements fils ocv apup dpp ssid_protection \
 		rsn_override_key_mgmt rsn_override_pairwise rsn_override_mfp \
-		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2
+		rsn_override_key_mgmt_2 rsn_override_pairwise_2 rsn_override_mfp_2 \
+		uci_section
 
 
 	json_get_values sae_groups sae_groups
@@ -1355,6 +1358,8 @@ hostapd_set_bss_options() {
 			append bss_conf "apup_peer_ifname_prefix=$apup_peer_ifname_prefix" "$N"
 		fi
 	fi
+
+	[ -n "$uci_section" ] && append bss_conf "uci_section=$uci_section" "$N"
 
 	json_get_values opts hostapd_bss_options
 	for val in $opts; do

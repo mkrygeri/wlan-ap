@@ -1,0 +1,95 @@
+From 43e910ff217b0ca3c156936f7cec41a301156f69 Mon Sep 17 00:00:00 2001
+From: Tanya Singh <tanya_singh@accton.com>
+Date: Tue, 25 Aug 2026 20:09:41 +0800
+Subject: [PATCH] wifi-scripts: pass uci_section through to hostapd
+
+The hostapd C side already knows about the uci_section BSS config
+parameter (zzz-0012-cfg-section.patch) and exports it in the get_status
+ubus reply, but nothing ever writes it into the generated BSS config, so
+hapd->conf->uci_section stays NULL and the field is silently omitted.
+
+Every consumer keys off that field to find the wifi-iface section that
+produced the BSS:
+
+ - ucentral-event does uci.get_all('wireless', <uci_section>), so
+   hapd.config is undefined. That breaks strict_forwarding (bridger
+   set_device_config is never called), the strict forwarding static FDB
+   updates, and the DHCP relay option-82 ssid/vlan-id circuit-id and
+   remote-id formats.
+ - rrmd local.uc does uci.get_all('rrmd', status.uci_section), so
+   per-BSS RRM configuration falls back to defaults.
+
+ucentral-schema already emits 'option uci_section' for every wifi-iface,
+so plumbing it through the config generator is all that is needed. Do it
+for both the shell and the ucode generator so the config does not break
+again when WIFI_SCRIPTS_UCODE is enabled.
+
+Signed-off-by: Tanya Singh <tanya_singh@accton.com>
+---
+ .../files-ucode/usr/share/schema/wireless.wifi-iface.json  | 4 ++++
+ .../wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc    | 1 +
+ .../config/wifi-scripts/files/lib/netifd/hostapd.sh        | 7 ++++++-
+ 3 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/package/network/config/wifi-scripts/files-ucode/usr/share/schema/wireless.wifi-iface.json b/package/network/config/wifi-scripts/files-ucode/usr/share/schema/wireless.wifi-iface.json
+index 75ec3a3bdb..9b3fc42695 100644
+--- a/package/network/config/wifi-scripts/files-ucode/usr/share/schema/wireless.wifi-iface.json
++++ b/package/network/config/wifi-scripts/files-ucode/usr/share/schema/wireless.wifi-iface.json
+@@ -1038,6 +1038,10 @@
+ 			"type": "boolean",
+ 			"default": true
+ 		},
++		"uci_section": {
++			"description": "Name of the UCI section this BSS was generated from, exported via the hostapd get_status ubus call",
++			"type": "string"
++		},
+ 		"uesa": {
+ 			"description": "Unauthenticated emergency service accessible",
+ 			"type": "boolean",
+diff --git a/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc b/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc
+index 0629e70409..2cd635f22c 100644
+--- a/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc
++++ b/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc
+@@ -60,6 +60,7 @@ function iface_setup(config) {
+ 		'ocv', 'beacon_prot', 'spp_amsdu', 'multicast_to_unicast', 'preamble', 'proxy_arp', 'per_sta_vif', 'mbo',
+ 		'bss_transition', 'wnm_sleep_mode', 'wnm_sleep_mode_no_keys', 'qos_map_set', 'max_listen_int',
+ 		'dtim_period', 'wmm_enabled', 'start_disabled', 'na_mcast_to_ucast', 'no_probe_resp_if_max_sta',
++		'uci_section',
+ 	]);
+ }
+ 
+diff --git a/package/network/config/wifi-scripts/files/lib/netifd/hostapd.sh b/package/network/config/wifi-scripts/files/lib/netifd/hostapd.sh
+index 5df4a58578..917e930339 100644
+--- a/package/network/config/wifi-scripts/files/lib/netifd/hostapd.sh
++++ b/package/network/config/wifi-scripts/files/lib/netifd/hostapd.sh
+@@ -469,6 +469,8 @@ hostapd_common_add_bss_config() {
+ 	config_add_string apup_peer_ifname_prefix
+ 
+ 	config_add_int rssi_reject_assoc_rssi rssi_ignore_probe_request
++
++	config_add_string uci_section
+ }
+ 
+ hostapd_set_vlan_file() {
+@@ -629,7 +631,8 @@ hostapd_set_bss_options() {
+ 		multicast_to_unicast_all proxy_arp per_sta_vif na_mcast_to_ucast \
+ 		eap_server eap_user_file ca_cert server_cert private_key private_key_passwd server_id radius_server_clients radius_server_auth_port \
+ 		vendor_elements fils ocv beacon_prot spp_amsdu apup rsn_override \
+-		rssi_reject_assoc_rssi rssi_ignore_probe_request
++		rssi_reject_assoc_rssi rssi_ignore_probe_request \
++		uci_section
+ 
+ 	set_default rsn_override 0
+ 	set_default fils 0
+@@ -1286,6 +1289,8 @@ hostapd_set_bss_options() {
+ 		fi
+ 	fi
+ 
++	[ -n "$uci_section" ] && append bss_conf "uci_section=$uci_section" "$N"
++
+ 	json_get_values opts hostapd_bss_options
+ 	for val in $opts; do
+ 		append bss_conf "$val" "$N"
+-- 
+2.34.1
+
