@@ -13,3 +13,4 @@ packages:
   - ipq50xx
 diffconfig: |
   CONFIG_KERNEL_IPQ_MEM_PROFILE=512
+  CONFIG_ATH11K_NSS_OFFLOAD=y

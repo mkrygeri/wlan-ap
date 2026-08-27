@@ -10,7 +10,8 @@ PKG_CONFIG_DEPENDS += \
 	CONFIG_ATH9K_SUPPORT_PCOEM \
 	CONFIG_ATH9K_TX99 \
 	CONFIG_ATH10K_LEDS \
-	CONFIG_ATH10K_THERMAL
+	CONFIG_ATH10K_THERMAL \
+	CONFIG_ATH11K_NSS_OFFLOAD
 
 ifdef CONFIG_PACKAGE_MAC80211_DEBUGFS
   config-y += \
@@ -59,6 +60,9 @@ config-$(call config_package,ath9k-htc) += ATH9K_HTC
 config-$(call config_package,ath10k) += ATH10K ATH10K_PCI
 config-$(call config_package,ath11k) += ATH11K ATH11K_AHB ATH11K_SPECTRAL ATH11K_DEBUG ATH11K_CFR
 config-$(call config_package,ath11k-pci) += ATH11K_PCI
+
+# MAC80211_NSS_SUPPORT is select'ed by ATH11K_NSS_SUPPORT, listed here for clarity.
+config-$(CONFIG_ATH11K_NSS_OFFLOAD) += ATH11K_NSS_SUPPORT MAC80211_NSS_SUPPORT
 
 #ifeq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),512)
 config-y += ATH11K_MEM_PROFILE_512M
@@ -292,6 +296,18 @@ endef
 define KernelPackage/ath11k/description
 This module adds support for wireless adapters based on
 Atheros IEEE 802.11ax family of chipsets.
+endef
+
+define KernelPackage/ath11k/config
+
+       config ATH11K_NSS_OFFLOAD
+               bool "Build the NSS offload datapath"
+               default n
+               depends on PACKAGE_kmod-ath11k
+               help
+                 Builds nss.o into ath11k. The datapath stays inert until
+                 ath11k.nss_offload=1 and mac80211.nss_redirect=1 are set.
+
 endef
 
 define KernelPackage/ath11k-ahb
