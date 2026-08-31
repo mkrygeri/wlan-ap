@@ -1,0 +1,74 @@
+From: Abhishek Vyas <abhishek.vyas@inventum.net>
+Subject: [PATCH] ath11k: nss: deliver EAPOL to the nl80211 control port
+
+With nss_offload=1 the WPA2 four-way handshake never completes. The
+station answers M1 with M2, hostapd never advances to M3, retransmits M1
+four times and deauthenticates after about 8 s. Reproduced on both bands
+on udaya_a6-id2 (IPQ5018 + QCN6122); it clears immediately on returning
+to nss_offload=0.
+
+M2 does reach the host - tcpdump on the wlanN netdev shows every
+retransmission - but hostapd never sees it. hostapd runs driver=nl80211
+and the driver advertises CONTROL_PORT_OVER_NL80211, so hostapd receives
+EAPOL through cfg80211_rx_control_port() rather than from a packet socket
+on the netdev. ath11k_nss_deliver_rx() hands NSS frames straight to
+napi_gro_receive(), bypassing the mac80211 RX handlers where that control
+port branch lives, so EAPOL is delivered as ordinary data and the
+authenticator is never fed. The function already carries a TODO noting it
+should move into mac80211.
+
+ath11k_mac_op_start() is supposed to prevent this by asking firmware to
+route EAPOL to the WBM release ring via the CCE, keeping it off the NSS
+path. That WMI call succeeds on IPQ5018 - neither of its failure paths
+logs anything - but the frames still arrive through NSS, so the rule is
+evidently not honoured on this chipset.
+
+Pass EAPOL to the control port in addition to the existing delivery.
+cfg80211_rx_control_port() copies the skb, matching how mac80211 calls it
+in ieee80211_deliver_skb_to_local_stack(), so the frame can still go up
+the netdev afterwards and napi_gro_receive() continues to own it. Doing
+this additively rather than diverting keeps any setup that reads EAPOL
+from a packet socket working, since the driver cannot see whether
+userspace asked for the control port - control_port_over_nl80211 lives in
+the private ieee80211_sub_if_data, not in ieee80211_vif.
+
+Fixing this inside ath11k_nss_deliver_rx() covers every caller: the
+normal vdev path, the AP_VLAN ext_vdev path, mesh and the WDS 4-addr
+exception paths all funnel through it.
+
+Two known limitations, both wanting review before this is considered
+final:
+
+- The unencrypted argument is hardcoded false. mac80211 derives it from
+  RX_FLAG_DECRYPTED, which the NSS path does not carry. NSS decrypts in
+  hardware, so false is right for every EAPOL except the plaintext M2.
+  Reporting a plaintext frame as protected weakens the signal userspace
+  uses to reject unencrypted EAPOL.
+- EAPOL continues up the netdev as it does today, so it still reaches the
+  bridge. mac80211 deliberately avoids that (see
+  313-mac80211-do-not-accept-forward-invalid-EAPOL-frames.patch). A
+  production fix should consult the vif's control port state and stop
+  forwarding when the control port owns the frame.
+
+Signed-off-by: Abhishek Vyas <abhishek.vyas@inventum.net>
+---
+--- a/drivers/net/wireless/ath/ath11k/nss.c
++++ b/drivers/net/wireless/ath/ath11k/nss.c
+@@ -503,6 +503,8 @@ static int ath11k_nss_deliver_rx(struct
+
+ deliver_msdu:
+ 	skb->protocol = eth_type_trans(skb, dev);
++	if (unlikely(skb->protocol == cpu_to_be16(ETH_P_PAE)))
++		cfg80211_rx_control_port(dev, skb, false);
+ 	napi_gro_receive(napi, skb);
+ 	return 0;
+
+@@ -524,6 +526,8 @@ deliver_amsdu:
+ 	while (!skb_queue_empty(&subframe_list)) {
+ 		subframe = __skb_dequeue(&subframe_list);
+ 		subframe->protocol = eth_type_trans(subframe, dev);
++		if (unlikely(subframe->protocol == cpu_to_be16(ETH_P_PAE)))
++			cfg80211_rx_control_port(dev, subframe, false);
+ 		napi_gro_receive(napi, subframe);
+ 	}
+
