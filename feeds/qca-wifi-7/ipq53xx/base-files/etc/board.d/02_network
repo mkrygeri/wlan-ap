@@ -138,10 +138,17 @@ qcom_setup_macs()
 		ucidef_set_wireless_macaddr_base 6g $(macaddr_add "$wan_mac" 4)
 		;;
 	zyxel,nwa210be)
-		wan_mac=$(cat /proc/cmdline)
-		wan_mac="${wan_mac##*hwaddr=}"
-		wan_mac="${wan_mac%% *}"
-		wan_mac="$(echo ${wan_mac} | sed 's/\(..\)/\1:/g;s/:$//')"
+		local cmdline=$(cat /proc/cmdline)
+		case "$cmdline" in
+		*hwaddr=*)
+			wan_mac="${cmdline##*hwaddr=}"
+			wan_mac="${wan_mac%% *}"
+			wan_mac="$(echo ${wan_mac} | sed 's/\(..\)/\1:/g;s/:$//')"
+			;;
+		*)
+			wan_mac=$(cat /sys/class/net/eth0/address)
+			;;
+		esac
 		lan_mac=$(macaddr_add "$wan_mac" 1)
 		ucidef_set_network_device_mac eth0 $wan_mac
 		ucidef_set_network_device_mac eth1 $lan_mac

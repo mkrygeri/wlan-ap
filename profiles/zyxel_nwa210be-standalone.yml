@@ -1,0 +1,45 @@
+---
+profile: zyxel_nwa210be
+target: ipq53xx
+subtarget: generic
+description: Standalone OpenWrt build for Zyxel NWA210BE (no uCentral)
+image: bin/targets/ipq53xx/generic/openwrt-ipq53xx-zyxel_nwa210be-squashfs-sysupgrade.tar
+feeds:
+  - name: qca
+    path: ../../feeds/qca-wifi-7
+packages:
+  - ipq53xx
+  - qca-ssdk-shell
+  - cgi-io
+  - liblucihttp
+  - lua
+  - luci
+  - luci-base
+  - luci-lua-runtime
+  - luci-mod-admin-full
+  - luci-mod-network
+  - luci-mod-status
+  - luci-mod-system
+  - luci-theme-bootstrap
+  - rpcd
+  - rpcd-mod-file
+  - rpcd-mod-iwinfo
+  - rpcd-mod-luci
+  - rpcd-mod-rrdns
+  - uhttpd
+  - uhttpd-mod-ubus
+  - curl
+  - dnsmasq-full
+  - ethtool
+  - hostapd-utils
+  - tcpdump
+  - libustream-openssl
+  - openssl-util
+  - ucode
+  - wireless-regdb
+  - wpad-openssl
+diffconfig: |
+  CONFIG_KERNEL_IPQ_MEM_PROFILE=0
+  CONFIG_OPENSSL_ENGINE=y
+  CONFIG_OPENSSL_PREFER_CHACHA_OVER_GCM=y
+  CONFIG_OPENSSL_WITH_ASM=y
